@@ -31,11 +31,15 @@ exports.handler = async (event) => {
 
       switch (exchange) {
         case "Binance":
-          price = parseFloat(data?.price);
-          break;
+  if (data?.price) {
+    price = parseFloat(data.price);
+  }
+  break;
         case "Bybit":
-          price = parseFloat(data?.result?.list?.[0]?.lastPrice);
-          break;
+  if (data?.retCode === 0 && data?.result?.list?.length > 0) {
+    price = parseFloat(data.result.list[0].lastPrice);
+  }
+  break;
         case "KuCoin":
           price = parseFloat(data?.data?.price);
           break;
