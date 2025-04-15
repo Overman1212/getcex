@@ -25,37 +25,44 @@ exports.handler = async (event) => {
 
   const pricePromises = Object.entries(apiUrls).map(async ([exchange, url]) => {
     try {
-      const response = await axios.get(url, { timeout: 3000 }); // 3s timeout
+      const response = await axios.get(url, { timeout: 3000 });
       const data = response.data;
       let price = null;
 
       switch (exchange) {
         case "Binance":
-  if (data?.price) {
-    price = parseFloat(data.price);
-  }
-  break;
+          if (data?.price) {
+            price = parseFloat(data.price);
+          }
+          break;
+
         case "Bybit":
-  if (data?.retCode === 0 && data?.result?.list?.length > 0) {
-    price = parseFloat(data.result.list[0].lastPrice);
-  }
-  break;
+          if (data?.retCode === 0 && data?.result?.list?.length > 0) {
+            price = parseFloat(data.result.list[0].lastPrice);
+          }
+          break;
+
         case "KuCoin":
           price = parseFloat(data?.data?.price);
           break;
+
         case "Kraken":
           const key = Object.keys(data.result)[0];
           price = parseFloat(data.result[key]?.c?.[0]);
           break;
+
         case "OKX":
           price = parseFloat(data?.data?.[0]?.last);
           break;
+
         case "Bitget":
           price = parseFloat(data?.data?.[0]?.price);
           break;
+
         case "MEXC":
           price = parseFloat(data?.price);
           break;
+
         case "Gate.io":
           price = parseFloat(data?.last);
           break;
@@ -69,9 +76,8 @@ exports.handler = async (event) => {
         };
       }
     } catch (e) {
-      // silently skip if error or timeout
+      // fail silently
     }
-
     return null;
   });
 
