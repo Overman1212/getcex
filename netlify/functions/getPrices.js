@@ -1,105 +1,85 @@
-const axios = require("axios");
+const fetch = require("node-fetch");
 
-exports.handler = async (event) => {
-  const params = event.queryStringParameters;
-  const amount = parseFloat(params.amount) || 1;
-  const symbol = (params.symbol || "").toUpperCase().trim();
+exports.handler = async function (event, context) {
+  const { symbol, amount = 1 } = event.queryStringParameters;
+  const upperSymbol = symbol?.toUpperCase();
 
-  if (!symbol) {
+  if (!upperSymbol) {
     return {
       statusCode: 400,
-      body: JSON.stringify({ error: "Missing symbol parameter" }),
+      body: JSON.stringify({ error: "Missing 'symbol' parameter." }),
     };
   }
 
-  const apiUrls = {
-    Binance: `https://api.binance.com/api/v3/ticker/price?symbol=${symbol}USDT`,
-    Bybit: `https://api.bybit.com/v5/market/tickers?category=spot&symbol=${symbol}USDT`,
-    KuCoin: `https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${symbol}-USDT`,
-    Kraken: `https://api.kraken.com/0/public/Ticker?pair=${symbol}USDT`,
-    OKX: `https://www.okx.com/api/v5/market/ticker?instId=${symbol}-USDT`,
-    Bitget: `https://api.bitget.com/api/v2/mix/market/symbol-price?productType=usdt-futures&symbol=${symbol}USDT`,
-    MEXC: `https://api.mexc.com/api/v3/ticker/price?symbol=${symbol}USDT`,
-    "Gate.io": `https://api.gateio.ws/api2/1/ticker/${symbol.toLowerCase()}_usdt`,
+  const quantity = parseFloat(amount) || 1;
+
+  const EXCHANGES = {
+    Binance: {
+      url: (s) => `https://api.binance.com/api/v3/ticker/price?symbol=${s}USDT`,
+      parser: (data) => parseFloat(data.price),
+    },
+    Bybit: {
+      url: (s) => `https://api.bybit.com/v2/public/tickers?symbol=${s}USDT`,
+      parser: (data) => parseFloat(data.result[0].last_price),
+    },
+    MEXC: {
+      url: (s) => `https://api.mexc.com/api/v3/ticker/price?symbol=${s}USDT`,
+      parser: (data) => parseFloat(data.price),
+    },
+    Gateio: {
+      url: (s) => `https://api.gateio.ws/api2/1/ticker/${s.toLowerCase()}_usdt`,
+      parser: (data) => parseFloat(data.last),
+    },
+    Bitget: {
+      url: (s) => `https://api.bitget.com/api/v2/mix/market/symbol-price?productType=usdt-futures&symbol=${s}USDT`,
+      parser: (data) => parseFloat(data.data[0].price),
+    },
+    OKX: {
+      url: (s) => `https://www.okx.com/api/v5/market/ticker?instId=${s}-USDT`,
+      parser: (data) => parseFloat(data.data[0].last),
+    },
+    KuCoin: {
+      url: (s) => `https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${s}-USDT`,
+      parser: (data) => parseFloat(data.data.price),
+    },
+    Kraken: {
+      url: (s) => `https://api.kraken.com/0/public/Ticker?pair=${s}USDT`,
+      parser: (data) => {
+        const key = Object.keys(data.result)[0];
+        return parseFloat(data.result[key].c[0]);
+      },
+    },
   };
 
-  const pricePromises = Object.entries(apiUrls).map(async ([exchange, url]) => {
+  const promises = Object.entries(EXCHANGES).map(async ([name, config]) => {
     try {
-      const response = await axios.get(url, { timeout: 3000 });
-      const data = response.data;
-      let price = null;
-
-      switch (exchange) {
-        case "Binance":
-          if (data?.price) {
-            price = parseFloat(data.price);
-          }
-          break;
-
-        case "Bybit":
-          if (data?.retCode === 0 && data?.result?.list?.length > 0) {
-            price = parseFloat(data.result.list[0].lastPrice);
-          }
-          break;
-
-        case "KuCoin":
-          price = parseFloat(data?.data?.price);
-          break;
-
-        case "Kraken":
-          const key = Object.keys(data.result)[0];
-          price = parseFloat(data.result[key]?.c?.[0]);
-          break;
-
-        case "OKX":
-          price = parseFloat(data?.data?.[0]?.last);
-          break;
-
-        case "Bitget":
-          price = parseFloat(data?.data?.[0]?.price);
-          break;
-
-        case "MEXC":
-          price = parseFloat(data?.price);
-          break;
-
-        case "Gate.io":
-          price = parseFloat(data?.last);
-          break;
-      }
-
-      if (price) {
-        return {
-          exchange,
-          price,
-          total: price * amount,
-        };
-      }
-    } catch (e) {
-      // fail silently
+      const res = await fetch(config.url(upperSymbol));
+      if (!res.ok) throw new Error("Failed");
+      const data = await res.json();
+      const price = config.parser(data);
+      if (!price) throw new Error("No price");
+      return { exchange: name, price, total: price * quantity };
+    } catch (err) {
+      return null;
     }
-    return null;
   });
 
-  const resultsArray = await Promise.all(pricePromises);
-  const results = resultsArray.filter(Boolean);
+  const results = await Promise.all(promises);
+  const valid = results.filter((item) => item !== null);
 
-  if (results.length === 0) {
+  if (valid.length === 0) {
     return {
       statusCode: 404,
-      body: JSON.stringify({ error: `${symbol} not found on supported exchanges.` }),
+      body: JSON.stringify({ error: "No prices found for symbol." }),
     };
   }
-
-  results.sort((a, b) => a.total - b.total);
 
   return {
     statusCode: 200,
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      symbol,
-      amount,
-      prices: results,
+      symbol: upperSymbol,
+      amount: quantity,
+      prices: valid.sort((a, b) => a.total - b.total),
     }),
   };
 };
