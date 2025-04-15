@@ -23,11 +23,9 @@ exports.handler = async (event) => {
     "Gate.io": `https://api.gateio.ws/api2/1/ticker/${symbol.toLowerCase()}_usdt`,
   };
 
-  const results = [];
-
-  for (const [exchange, url] of Object.entries(apiUrls)) {
+  const pricePromises = Object.entries(apiUrls).map(async ([exchange, url]) => {
     try {
-      const response = await axios.get(url);
+      const response = await axios.get(url, { timeout: 3000 }); // 3s timeout
       const data = response.data;
       let price = null;
 
@@ -60,16 +58,21 @@ exports.handler = async (event) => {
       }
 
       if (price) {
-        results.push({
+        return {
           exchange,
-          price: price,
+          price,
           total: price * amount,
-        });
+        };
       }
     } catch (e) {
-      // skip failed exchange
+      // silently skip if error or timeout
     }
-  }
+
+    return null;
+  });
+
+  const resultsArray = await Promise.all(pricePromises);
+  const results = resultsArray.filter(Boolean);
 
   if (results.length === 0) {
     return {
@@ -82,6 +85,7 @@ exports.handler = async (event) => {
 
   return {
     statusCode: 200,
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       symbol,
       amount,
